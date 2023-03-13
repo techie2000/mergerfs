@@ -46,8 +46,8 @@ namespace ff
         rv = fs::info(branch.path,&info);
         if(rv == -1)
           error_and_continue(error,ENOENT);
-        if(info.readonly)
-          error_and_continue(error,EROFS);
+        // if(info.readonly)
+        //   error_and_continue(error,EROFS);
         if(info.spaceavail < branch.minfreespace())
           error_and_continue(error,ENOSPC);
 

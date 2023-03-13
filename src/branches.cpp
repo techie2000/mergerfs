@@ -80,14 +80,11 @@ namespace l
     uint64_t offset;
 
     offset = s_.find_first_not_of("+<>-=");
-    if (offset == std::string::npos) {
-      return;
-    }
-
     if(offset > 1)
       offset = 2;
     *instr_ = s_.substr(0,offset);
-    *values_ = s_.substr(offset);
+    if(offset != std::string::npos)
+      *values_ = s_.substr(offset);
   }
 
   static
@@ -378,6 +375,17 @@ Branches::Impl::to_paths() const
     vp.emplace_back(branch.path);
 
   return vp;
+}
+
+void
+Branches::set_mode_to_ro(const std::string path_)
+{
+  for(auto &branch : *_impl)
+    {
+      if(branch.path != path_)
+        continue;
+      branch.mode = Branch::Mode::RO;
+    }
 }
 
 int

@@ -17,9 +17,10 @@
 #include "config.hpp"
 #include "errno.hpp"
 #include "fs_acl.hpp"
-#include "fs_mknod.hpp"
 #include "fs_clonepath.hpp"
+#include "fs_mknod.hpp"
 #include "fs_path.hpp"
+#include "syslog.hpp"
 #include "ugid.hpp"
 
 #include "fuse.h"
@@ -54,12 +55,27 @@ namespace error
 namespace l
 {
   static
+  void
+  set_branches_mode_to_ro(const std::string path_to_set_ro_)
+  {
+    Config::Write cfg;
+
+    for(auto &branch : *cfg->branches())
+      {
+        if(branch.path != path_to_set_ro_)
+          continue;
+        branch.mode = Branch::Mode::RO;
+        syslog_warning("Error opening file for write: EROFS - branch %s mode set to RO",branch.path.c_str());
+      }
+  }
+
+  static
   inline
   int
-  mknod_core(const string &fullpath_,
-             mode_t        mode_,
-             const mode_t  umask_,
-             const dev_t   dev_)
+  mknod(const string &fullpath_,
+        mode_t        mode_,
+        const mode_t  umask_,
+        const dev_t   dev_)
   {
     if(!fs::acl::dir_has_defaults(fullpath_))
       mode_ &= ~umask_;
@@ -69,46 +85,62 @@ namespace l
 
   static
   int
-  mknod_loop_core(const string &createpath_,
-                  const char   *fusepath_,
-                  const mode_t  mode_,
-                  const mode_t  umask_,
-                  const dev_t   dev_,
-                  const int     error_)
+  mknod(const string &createpath_,
+        const char   *fusepath_,
+        const mode_t  mode_,
+        const mode_t  umask_,
+        const dev_t   dev_)
   {
     int rv;
     string fullpath;
 
     fullpath = fs::path::make(createpath_,fusepath_);
 
-    rv = l::mknod_core(fullpath,mode_,umask_,dev_);
+    rv = l::mknod(fullpath,mode_,umask_,dev_);
 
-    return error::calc(rv,error_,errno);
+    return rv;
   }
 
   static
   int
-  mknod_loop(const string         &existingpath_,
-             const vector<string> &createpaths_,
-             const char           *fusepath_,
-             const string         &fusedirpath_,
-             const mode_t          mode_,
-             const mode_t          umask_,
-             const dev_t           dev_)
+  mknod(const std::string &existingpath_,
+        const std::string &createpath_,
+        const std::string &fusedirpath_,
+        const char        *fusepath_,
+        const mode_t       mode_,
+        const mode_t       umask_,
+        const dev_t        dev_)
+  {
+    int rv;
+
+    rv = fs::clonepath_as_root(existingpath_,createpath_,fusedirpath_);
+    if(rv == -1)
+      return rv;
+
+    return l::mknod(createpath_,fusepath_,mode_,umask_,dev_);
+  }
+
+  static
+  int
+  mknod(const string         &existingpath_,
+        const vector<string> &createpaths_,
+        const char           *fusepath_,
+        const string         &fusedirpath_,
+        const mode_t          mode_,
+        const mode_t          umask_,
+        const dev_t           dev_)
   {
     int rv;
     int error;
 
     error = -1;
-    for(size_t i = 0, ei = createpaths_.size(); i != ei; i++)
+    for(auto const &createpath : createpaths_)
       {
-        rv = fs::clonepath_as_root(existingpath_,createpaths_[i],fusedirpath_);
-        if(rv == -1)
-          error = error::calc(rv,error,errno);
-        else
-          error = l::mknod_loop_core(createpaths_[i],
-                                     fusepath_,
-                                     mode_,umask_,dev_,error);
+        rv = l::mknod(existingpath_,createpath,fusedirpath_,fusepath_,mode_,umask_,dev_);
+        if((rv == -1) && (errno == EROFS))
+          l::set_branches_mode_to_ro(createpath);
+
+        error = error::calc(rv,error,errno);
       }
 
     return -error;
@@ -139,9 +171,11 @@ namespace l
     if(rv == -1)
       return -errno;
 
-    return l::mknod_loop(existingpaths[0],createpaths,
-                         fusepath_,fusedirpath,
-                         mode_,umask_,dev_);
+    rv = l::mknod(existingpaths[0],createpaths,
+                  fusepath_,fusedirpath,
+                  mode_,umask_,dev_);
+
+    return rv;
   }
 }
 

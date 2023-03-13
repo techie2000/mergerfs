@@ -21,6 +21,7 @@
 #include "fs_mkdir.hpp"
 #include "fs_path.hpp"
 #include "policy.hpp"
+#include "syslog.hpp"
 #include "ugid.hpp"
 
 #include "fuse.h"
@@ -53,10 +54,25 @@ namespace error
 namespace l
 {
   static
+  void
+  set_branches_mode_to_ro(const std::string path_to_set_ro_)
+  {
+    Config::Write cfg;
+
+    for(auto &branch : *cfg->branches())
+      {
+        if(branch.path != path_to_set_ro_)
+          continue;
+        branch.mode = Branch::Mode::RO;
+        syslog_warning("Error opening file for write: EROFS - branch %s mode set to RO",branch.path.c_str());
+      }
+  }
+
+  static
   int
-  mkdir_core(const string &fullpath_,
-             mode_t        mode_,
-             const mode_t  umask_)
+  mkdir(const string &fullpath_,
+        mode_t        mode_,
+        const mode_t  umask_)
   {
     if(!fs::acl::dir_has_defaults(fullpath_))
       mode_ &= ~umask_;
@@ -66,46 +82,56 @@ namespace l
 
   static
   int
-  mkdir_loop_core(const string &createpath_,
-                  const char   *fusepath_,
-                  const mode_t  mode_,
-                  const mode_t  umask_,
-                  const int     error_)
+  mkdir(const string &createpath_,
+        const char   *fusepath_,
+        const mode_t  mode_,
+        const mode_t  umask_)
   {
-    int rv;
     string fullpath;
 
     fullpath = fs::path::make(createpath_,fusepath_);
 
-    rv = l::mkdir_core(fullpath,mode_,umask_);
-
-    return error::calc(rv,error_,errno);
+    return l::mkdir(fullpath,mode_,umask_);
   }
 
   static
   int
-  mkdir_loop(const string &existingpath_,
-             const StrVec &createpaths_,
-             const char   *fusepath_,
-             const string &fusedirpath_,
-             const mode_t  mode_,
-             const mode_t  umask_)
+  mkdir(const std::string &existingpath_,
+        const std::string &createpath_,
+        const std::string &fusedirpath_,
+        const char        *fusepath_,
+        const mode_t       mode_,
+        const mode_t       umask_)
+  {
+    int rv;
+
+    rv = fs::clonepath_as_root(existingpath_,createpath_,fusedirpath_);
+    if(rv == -1)
+      return rv;
+
+    return l::mkdir(createpath_,fusepath_,mode_,umask_);
+  }
+
+  static
+  int
+  mkdir(const string &existingpath_,
+        const StrVec &createpaths_,
+        const string &fusedirpath_,
+        const char   *fusepath_,
+        const mode_t  mode_,
+        const mode_t  umask_)
   {
     int rv;
     int error;
 
     error = -1;
-    for(size_t i = 0, ei = createpaths_.size(); i != ei; i++)
+    for(auto const &createpath : createpaths_)
       {
-        rv = fs::clonepath_as_root(existingpath_,createpaths_[i],fusedirpath_);
-        if(rv == -1)
-          error = error::calc(rv,error,errno);
-        else
-          error = l::mkdir_loop_core(createpaths_[i],
-                                     fusepath_,
-                                     mode_,
-                                     umask_,
-                                     error);
+        rv = l::mkdir(existingpath_,createpath,fusedirpath_,fusepath_,mode_,umask_);
+        if((rv == -1) && (errno == EROFS))
+          l::set_branches_mode_to_ro(createpath);
+
+        error = error::calc(rv,error,errno);
       }
 
     return -error;
@@ -127,20 +153,25 @@ namespace l
 
     fusedirpath = fs::path::dirname(fusepath_);
 
-    rv = getattrPolicy_(branches_,fusedirpath.c_str(),&existingpaths);
+    rv = getattrPolicy_(branches_,fusedirpath,&existingpaths);
     if(rv == -1)
       return -errno;
 
-    rv = mkdirPolicy_(branches_,fusedirpath.c_str(),&createpaths);
+    rv = mkdirPolicy_(branches_,fusedirpath,&createpaths);
     if(rv == -1)
       return -errno;
 
-    return l::mkdir_loop(existingpaths[0],
-                         createpaths,
-                         fusepath_,
-                         fusedirpath,
-                         mode_,
-                         umask_);
+    rv = l::mkdir(existingpaths[0],createpaths,fusedirpath,fusepath_,mode_,umask_);
+    if(rv == -EROFS)
+      {
+        createpaths.clear();
+        rv = mkdirPolicy_(branches_,fusedirpath,&createpaths);
+        if(rv == -1)
+          return -errno;
+        rv = l::mkdir(existingpaths[0],createpaths,fusedirpath,fusepath_,mode_,umask_);
+      }
+
+    return rv;
   }
 }
 

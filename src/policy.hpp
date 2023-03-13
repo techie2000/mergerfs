@@ -133,6 +133,11 @@ namespace Policy
 
     int
     operator()(const Branches::CPtr &branches_,
+               const char           *fusepath_,
+               Branch               &branch_) const;
+
+    int
+    operator()(const Branches::CPtr &branches_,
                const std::string    &fusepath_,
                StrVec               *paths_) const
     {

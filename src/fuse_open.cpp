@@ -25,6 +25,7 @@
 #include "fs_stat.hpp"
 #include "procfs_get_name.hpp"
 #include "stat_util.hpp"
+#include "syslog.hpp"
 #include "ugid.hpp"
 
 #include "fuse.h"
@@ -212,7 +213,9 @@ namespace l
     if(rv == -1)
       return -errno;
 
-    return l::open_core(basepaths[0],fusepath_,flags_,link_cow_,nfsopenhack_,fh_);
+    rv = l::open_core(basepaths[0],fusepath_,flags_,link_cow_,nfsopenhack_,fh_);
+
+    return rv;
   }
 }
 

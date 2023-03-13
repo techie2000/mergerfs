@@ -73,8 +73,15 @@ public:
   std::string to_string(void) const final;
 
 public:
+  Ptr operator()()        { std::lock_guard<std::mutex> lg(_mutex); return _impl; }
+  CPtr operator()() const { std::lock_guard<std::mutex> lg(_mutex); return _impl; }
   operator CPtr()   const { std::lock_guard<std::mutex> lg(_mutex); return _impl; }
+  operator Ptr()          { std::lock_guard<std::mutex> lg(_mutex); return _impl; }
   CPtr operator->() const { std::lock_guard<std::mutex> lg(_mutex); return _impl; }
+  Ptr  operator->()       { std::lock_guard<std::mutex> lg(_mutex); return _impl; }
+
+public:
+  void set_mode_to_ro(const std::string path);
 
 private:
   mutable std::mutex _mutex;

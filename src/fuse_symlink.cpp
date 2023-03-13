@@ -17,11 +17,12 @@
 #include "config.hpp"
 #include "errno.hpp"
 #include "fs_clonepath.hpp"
+#include "fs_inode.hpp"
 #include "fs_lstat.hpp"
 #include "fs_path.hpp"
-#include "fs_inode.hpp"
 #include "fs_symlink.hpp"
 #include "fuse_getattr.hpp"
+#include "syslog.hpp"
 #include "ugid.hpp"
 
 #include "fuse.h"
@@ -56,13 +57,26 @@ namespace error
 
 namespace l
 {
+  void
+  set_branches_mode_to_ro(const std::string path_to_set_ro_)
+  {
+    Config::Write cfg;
+
+    for(auto &branch : *cfg->branches())
+      {
+        if(branch.path != path_to_set_ro_)
+          continue;
+        branch.mode = Branch::Mode::RO;
+        syslog_warning("Error opening file for write: EROFS - branch %s mode set to RO",branch.path.c_str());
+      }
+  }
+
   static
   int
-  symlink_loop_core(const string &newbasepath_,
-                    const char   *target_,
-                    const char   *linkpath_,
-                    struct stat  *st_,
-                    const int     error_)
+  symlink(const string &newbasepath_,
+          const char   *target_,
+          const char   *linkpath_,
+          struct stat  *st_)
   {
     int rv;
     string fullnewpath;
@@ -77,33 +91,47 @@ namespace l
           fs::inode::calc(linkpath_,st_);
       }
 
-    return error::calc(rv,error_,errno);
+    return rv;
   }
 
   static
   int
-  symlink_loop(const string &existingpath_,
-               const StrVec &newbasepaths_,
-               const char   *target_,
-               const char   *linkpath_,
-               const string &newdirpath_,
-               struct stat  *st_)
+  symlink(const std::string &existingpath_,
+          const std::string &newbasepath_,
+          const char        *target_,
+          const char        *linkpath_,
+          const std::string &newdirpath_,
+          struct stat       *st_)
+  {
+    int rv;
+
+    rv = fs::clonepath_as_root(existingpath_,newbasepath_,newdirpath_);
+    if(rv == -1)
+      return rv;
+
+    return l::symlink(newbasepath_,target_,linkpath_,st_);
+  }
+
+  static
+  int
+  symlink(const string &existingpath_,
+          const StrVec &newbasepaths_,
+          const char   *target_,
+          const char   *linkpath_,
+          const string &newdirpath_,
+          struct stat  *st_)
   {
     int rv;
     int error;
 
     error = -1;
-    for(size_t i = 0, ei = newbasepaths_.size(); i != ei; i++)
+    for(auto const &newbasepath : newbasepaths_)
       {
-        rv = fs::clonepath_as_root(existingpath_,newbasepaths_[i],newdirpath_);
-        if(rv == -1)
-          error = error::calc(rv,error,errno);
-        else
-          error = l::symlink_loop_core(newbasepaths_[i],
-                                       target_,
-                                       linkpath_,
-                                       st_,
-                                       error);
+        rv = l::symlink(existingpath_,newbasepath,target_,linkpath_,newdirpath_,st_);
+        if((rv == -1) && (errno == EROFS))
+          l::set_branches_mode_to_ro(newbasepath);
+
+        error = error::calc(rv,error,errno);
       }
 
     return -error;
@@ -133,8 +161,17 @@ namespace l
     if(rv == -1)
       return -errno;
 
-    return l::symlink_loop(existingpaths[0],newbasepaths,
-                           target_,linkpath_,newdirpath,st_);
+    rv = l::symlink(existingpaths[0],newbasepaths,target_,linkpath_,newdirpath,st_);
+    if(rv == -EROFS)
+      {
+        newbasepaths.clear();
+        rv = createFunc_(branches_,newdirpath,&newbasepaths);
+        if(rv == -1)
+          return -errno;
+        rv = l::symlink(existingpaths[0],newbasepaths,target_,linkpath_,newdirpath,st_);
+      }
+
+    return rv;
   }
 }
 

@@ -23,6 +23,7 @@
 #include "fuse_getattr.hpp"
 #include "fuse_symlink.hpp"
 #include "ghc/filesystem.hpp"
+#include "syslog.hpp"
 #include "ugid.hpp"
 
 #include "fuse.h"
@@ -57,31 +58,64 @@ namespace error
 namespace l
 {
   static
+  void
+  set_branches_mode_to_ro(const std::string path_to_set_ro_)
+  {
+    Config::Write cfg;
+
+    for(auto &branch : *cfg->branches())
+      {
+        if(branch.path != path_to_set_ro_)
+          continue;
+        branch.mode = Branch::Mode::RO;
+        syslog_warning("Error opening file for write: EROFS - branch %s mode set to RO",branch.path.c_str());
+      }
+  }
+
+  static
   int
-  link_create_path_loop(const StrVec &oldbasepaths_,
-                        const string &newbasepath_,
-                        const char   *oldfusepath_,
-                        const char   *newfusepath_,
-                        const string &newfusedirpath_)
+  link_create_path(const std::string &oldbasepath_,
+                   const std::string &newbasepath_,
+                   const char        *oldfusepath_,
+                   const char        *newfusepath_,
+                   const std::string &newfusedirpath_)
+  {
+    int rv;
+    std::string oldfullpath;
+    std::string newfullpath;
+
+    oldfullpath = fs::path::make(oldbasepath_,oldfusepath_);
+    newfullpath = fs::path::make(oldbasepath_,newfusepath_);
+
+    rv = fs::link(oldfusepath_,newfullpath);
+    if((rv == -1) && (errno == ENOENT))
+      {
+        rv = fs::clonepath_as_root(newbasepath_,oldfusepath_,newfusedirpath_);
+        if(rv == 0)
+          rv = fs::link(oldfusepath_,newfullpath);
+      }
+
+    return rv;
+  }
+
+
+  static
+  int
+  link_create_path(const StrVec &oldbasepaths_,
+                   const string &newbasepath_,
+                   const char   *oldfusepath_,
+                   const char   *newfusepath_,
+                   const string &newfusedirpath_)
   {
     int rv;
     int error;
-    string oldfullpath;
-    string newfullpath;
 
     error = -1;
     for(auto &oldbasepath : oldbasepaths_)
       {
-        oldfullpath = fs::path::make(oldbasepath,oldfusepath_);
-        newfullpath = fs::path::make(oldbasepath,newfusepath_);
-
-        rv = fs::link(oldfullpath,newfullpath);
-        if((rv == -1) && (errno == ENOENT))
-          {
-            rv = fs::clonepath_as_root(newbasepath_,oldbasepath,newfusedirpath_);
-            if(rv == 0)
-              rv = fs::link(oldfullpath,newfullpath);
-          }
+        rv = l::link_create_path(oldbasepath,newbasepath_,oldfusepath_,newfusepath_,newfusedirpath_);
+        if((rv == -1) && (errno == -EROFS))
+          l::set_branches_mode_to_ro(oldbasepath);
 
         error = error::calc(rv,error,errno);
       }
@@ -112,9 +146,22 @@ namespace l
     if(rv == -1)
       return -errno;
 
-    return l::link_create_path_loop(oldbasepaths,newbasepaths[0],
-                                    oldfusepath_,newfusepath_,
-                                    newfusedirpath);
+    rv = l::link_create_path(oldbasepaths,newbasepaths[0],
+                             oldfusepath_,newfusepath_,
+                             newfusedirpath);
+    if(rv == -EROFS)
+      {
+        oldbasepaths.clear();
+        rv = actionFunc_(branches_,oldfusepath_,&oldbasepaths);
+        if(rv == -1)
+          return -errno;
+
+        rv = l::link_create_path(oldbasepaths,newbasepaths[0],
+                                 oldfusepath_,newfusepath_,
+                                 newfusedirpath);
+      }
+
+    return rv;
   }
 
   static
