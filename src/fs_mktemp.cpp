@@ -24,38 +24,35 @@
 
 #include <limits.h>
 
-using std::string;
-
 #define PADLEN 6
 #define MAX_ATTEMPTS 10
 
 
 static
-string
-generate_tmp_path(const string &base_)
+std::string
+generate_tmp_path(const std::string base_)
 {
-  string tmp;
+  std::string path = base_;
 
-  tmp = base_;
-  if((tmp.size() + PADLEN + 1) > PATH_MAX)
-    tmp.resize(tmp.size() - PADLEN - 1);
-  tmp += '.';
+  if((path.size() + PADLEN + 1) > PATH_MAX)
+    path.resize(path.size() - PADLEN - 1);
+  path += '.';
   for(int i = 0; i < PADLEN; i++)
-    tmp += ('A' + (std::rand() % 26));
+    path += ('A' + (std::rand() % 26));
 
-  return tmp;
+  return path;
 }
 
 namespace fs
 {
   int
-  mktemp(string    *base_,
-         const int  flags_)
+  mktemp(std::string *base_,
+         const int    flags_)
   {
     int fd;
     int count;
     int flags;
-    string tmppath;
+    std::string tmppath;
 
     fd    = -1;
     count = MAX_ATTEMPTS;

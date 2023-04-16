@@ -81,7 +81,7 @@ public:
   Ptr  operator->()       { std::lock_guard<std::mutex> lg(_mutex); return _impl; }
 
 public:
-  void set_mode_to_ro(const std::string path);
+  void find_and_set_mode_ro();
 
 private:
   mutable std::mutex _mutex;

@@ -190,19 +190,6 @@ namespace l
       return -errno;
 
     rv = l::create(existingpaths[0],createpaths[0],fusedirpath,fusepath_,mode_,umask_,flags_,fh_);
-    if(rv == -EROFS)
-      {
-        Config::Write()->branches.set_mode_to_ro(createpaths[0]);
-        log::warn_erofs("creating file",createpaths[0]);
-        l::syslog_warn_erofs(createpaths[0]);
-
-        createpaths.clear();
-        rv = createFunc_(branches_,fusedirpath,&createpaths);
-        if(rv == -1)
-          return -errno;
-
-        rv = l::create(existingpaths[0],createpaths[0],fusedirpath,fusepath_,mode_,umask_,flags_,fh_);
-      }
 
     return rv;
   }
@@ -233,6 +220,18 @@ namespace FUSE
                    fc->umask,
                    ffi_->flags,
                    &ffi_->fh);
+    if(rv == -EROFS)
+      {
+        Config::Write()->branches.find_and_set_mode_ro();
+        rv = l::create(cfg->func.getattr.policy,
+                       cfg->func.create.policy,
+                       cfg->branches,
+                       fusepath_,
+                       mode_,
+                       fc->umask,
+                       ffi_->flags,
+                       &ffi_->fh);
+      }
 
     return rv;
   }
