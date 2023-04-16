@@ -144,6 +144,21 @@ namespace Policy
       return (*impl)(branches_,fusepath_.c_str(),paths_);
     }
 
+    int
+    operator()(const Branches::CPtr &branches_,
+               const std::string    &fusepath_,
+               std::string          *path_) const
+    {
+      int rv;
+      StrVec paths;
+
+      rv = (*impl)(branches_,fusepath_.c_str(),&paths);
+      if(!paths.empty())
+        *path_ = paths[0];
+
+      return rv;
+    }
+
     operator bool() const
     {
       return (bool)impl;
@@ -201,6 +216,21 @@ namespace Policy
                StrVec               *paths_) const
     {
       return (*impl)(branches_,fusepath_.c_str(),paths_);
+    }
+
+    int
+    operator()(const Branches::CPtr &branches_,
+               const std::string    &fusepath_,
+               std::string          *path_) const
+    {
+      int rv;
+      StrVec paths;
+
+      rv = (*impl)(branches_,fusepath_.c_str(),&paths);
+      if(!paths.empty())
+        *path_ = paths[0];
+
+      return rv;
     }
 
     operator bool() const

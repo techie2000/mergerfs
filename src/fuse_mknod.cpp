@@ -27,30 +27,6 @@
 #include <string>
 #include <vector>
 
-namespace std
-{
-  typedef std::vector<std::string> strvec;
-}
-
-namespace error
-{
-  static
-  inline
-  int
-  calc(const int rv_,
-       const int prev_,
-       const int cur_)
-  {
-    if(rv_ == -1)
-      {
-        if(prev_ == 0)
-          return 0;
-        return cur_;
-      }
-
-    return 0;
-  }
-}
 
 namespace l
 {
@@ -107,30 +83,6 @@ namespace l
 
   static
   int
-  mknod(const std::string &existingpath_,
-        const std::strvec &createpaths_,
-        const char        *fusepath_,
-        const std::string &fusedirpath_,
-        const mode_t       mode_,
-        const mode_t       umask_,
-        const dev_t        dev_)
-  {
-    int rv;
-    int error;
-
-    error = -1;
-    for(auto const &createpath : createpaths_)
-      {
-        rv = l::mknod(existingpath_,createpath,fusedirpath_,fusepath_,mode_,umask_,dev_);
-
-        error = error::calc(rv,error,errno);
-      }
-
-    return -error;
-  }
-
-  static
-  int
   mknod(const Policy::Search &searchFunc_,
         const Policy::Create &createFunc_,
         const Branches       &branches_,
@@ -141,22 +93,26 @@ namespace l
   {
     int rv;
     std::string fusedirpath;
-    std::strvec createpaths;
-    std::strvec existingpaths;
+    std::string createpath;
+    std::string existingpath;
 
     fusedirpath = fs::path::dirname(fusepath_);
 
-    rv = searchFunc_(branches_,fusedirpath,&existingpaths);
+    rv = searchFunc_(branches_,fusedirpath,&existingpath);
     if(rv == -1)
       return -errno;
 
-    rv = createFunc_(branches_,fusedirpath,&createpaths);
+    rv = createFunc_(branches_,fusedirpath,&createpath);
     if(rv == -1)
       return -errno;
 
-    rv = l::mknod(existingpaths[0],createpaths,
-                  fusepath_,fusedirpath,
-                  mode_,umask_,dev_);
+    rv = l::mknod(existingpath,
+                  createpath,
+                  fusedirpath,
+                  fusepath_,
+                  mode_,
+                  umask_,
+                  dev_);
 
     return rv;
   }
