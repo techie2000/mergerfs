@@ -20,7 +20,6 @@
 #include "fs_clonepath.hpp"
 #include "fs_mknod.hpp"
 #include "fs_path.hpp"
-#include "syslog.hpp"
 #include "ugid.hpp"
 
 #include "fuse.h"
@@ -28,9 +27,10 @@
 #include <string>
 #include <vector>
 
-using std::string;
-using std::vector;
-
+namespace std
+{
+  typedef std::vector<std::string> strvec;
+}
 
 namespace error
 {
@@ -55,27 +55,12 @@ namespace error
 namespace l
 {
   static
-  void
-  set_branches_mode_to_ro(const std::string path_to_set_ro_)
-  {
-    Config::Write cfg;
-
-    for(auto &branch : *cfg->branches())
-      {
-        if(branch.path != path_to_set_ro_)
-          continue;
-        branch.mode = Branch::Mode::RO;
-        syslog_warning("Error opening file for write: EROFS - branch %s mode set to RO",branch.path.c_str());
-      }
-  }
-
-  static
   inline
   int
-  mknod(const string &fullpath_,
-        mode_t        mode_,
-        const mode_t  umask_,
-        const dev_t   dev_)
+  mknod(const std::string &fullpath_,
+        mode_t             mode_,
+        const mode_t       umask_,
+        const dev_t        dev_)
   {
     if(!fs::acl::dir_has_defaults(fullpath_))
       mode_ &= ~umask_;
@@ -85,14 +70,14 @@ namespace l
 
   static
   int
-  mknod(const string &createpath_,
-        const char   *fusepath_,
-        const mode_t  mode_,
-        const mode_t  umask_,
-        const dev_t   dev_)
+  mknod(const std::string &createpath_,
+        const char        *fusepath_,
+        const mode_t       mode_,
+        const mode_t       umask_,
+        const dev_t        dev_)
   {
     int rv;
-    string fullpath;
+    std::string fullpath;
 
     fullpath = fs::path::make(createpath_,fusepath_);
 
@@ -122,13 +107,13 @@ namespace l
 
   static
   int
-  mknod(const string         &existingpath_,
-        const vector<string> &createpaths_,
-        const char           *fusepath_,
-        const string         &fusedirpath_,
-        const mode_t          mode_,
-        const mode_t          umask_,
-        const dev_t           dev_)
+  mknod(const std::string &existingpath_,
+        const std::strvec &createpaths_,
+        const char        *fusepath_,
+        const std::string &fusedirpath_,
+        const mode_t       mode_,
+        const mode_t       umask_,
+        const dev_t        dev_)
   {
     int rv;
     int error;
@@ -137,8 +122,6 @@ namespace l
     for(auto const &createpath : createpaths_)
       {
         rv = l::mknod(existingpath_,createpath,fusedirpath_,fusepath_,mode_,umask_,dev_);
-        if((rv == -1) && (errno == EROFS))
-          l::set_branches_mode_to_ro(createpath);
 
         error = error::calc(rv,error,errno);
       }
@@ -157,9 +140,9 @@ namespace l
         const dev_t           dev_)
   {
     int rv;
-    string fusedirpath;
-    vector<string> createpaths;
-    vector<string> existingpaths;
+    std::string fusedirpath;
+    std::strvec createpaths;
+    std::strvec existingpaths;
 
     fusedirpath = fs::path::dirname(fusepath_);
 
@@ -186,16 +169,30 @@ namespace FUSE
         mode_t      mode_,
         dev_t       rdev_)
   {
+    int rv;
     Config::Read cfg;
     const fuse_context *fc = fuse_get_context();
     const ugid::Set     ugid(fc->uid,fc->gid);
 
-    return l::mknod(cfg->func.getattr.policy,
-                    cfg->func.mknod.policy,
-                    cfg->branches,
-                    fusepath_,
-                    mode_,
-                    fc->umask,
-                    rdev_);
+    rv = l::mknod(cfg->func.getattr.policy,
+                  cfg->func.mknod.policy,
+                  cfg->branches,
+                  fusepath_,
+                  mode_,
+                  fc->umask,
+                  rdev_);
+    if(rv == -EROFS)
+      {
+        Config::Write()->branches.find_and_set_mode_ro();
+        rv = l::mknod(cfg->func.getattr.policy,
+                      cfg->func.mknod.policy,
+                      cfg->branches,
+                      fusepath_,
+                      mode_,
+                      fc->umask,
+                      rdev_);
+      }
+
+    return rv;
   }
 }
